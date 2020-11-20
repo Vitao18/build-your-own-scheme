@@ -33,6 +33,26 @@ parseAtom = do
     "#f" -> Bool False
     _    -> Atom atom
 
+parseList :: Parser LispVal
+parseList = liftM List $ sepBy parseExpr spaces
+
+parseDottedList :: Parser LispVal
+parseDottedList = do
+  head <- endBy parseExpr spaces
+  tail <- char '.' >> spaces >> parseExpr
+  return $ DottedList head tail
+
+parseVector :: Parser LispVal
+parseVector = do
+  char '#'
+  parseList
+
+parseQuoted :: Parser LispVal
+parseQuoted = do
+  char '\''
+  x <- parseExpr
+  return $ List [Atom "quote", x]
+
 {- parseNumber :: Parser LispVal
 parseNumber = liftM (Number . read) $ many1 digit -}
 
@@ -45,7 +65,17 @@ parseNumber :: Parser LispVal
 parseNumber =  (many1 digit) >>= (return . Number . read)
 
 parseExpr :: Parser LispVal
-parseExpr = parseAtom <|> parseString <|> parseNumber
+parseExpr = parseAtom
+  <|> parseString
+  <|> parseNumber
+  <|> parseQuoted
+  <|> do
+    char '('
+    x <- try parseList <|> parseDottedList
+    char ')'
+    return x
+
+-- <|> between (char '(') (char ')') (try parseList <|> parseDottedList)
 
 readExpr :: String -> String
 readExpr input = case parse parseExpr "lisp" input of
