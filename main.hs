@@ -9,6 +9,9 @@ data LispVal = Atom String
              | Number Integer
              | String String
              | Bool Bool
+             | Binary String
+
+instance Show LispVal where show = showVal
 
 symbol :: Parser Char
 symbol = oneOf "!#$%&|*+-/:<=>?@_~"
@@ -64,28 +67,95 @@ parseNumber = do
 parseNumber :: Parser LispVal
 parseNumber =  (many1 digit) >>= (return . Number . read)
 
+parseBinary :: Parser LispVal
+parseBinary = do
+  char '#'
+  char 'b'
+  x <- many (oneOf ("10"))
+  return $ Binary x
+  
+
 parseExpr :: Parser LispVal
 parseExpr = parseAtom
   <|> parseString
   <|> parseNumber
   <|> parseQuoted
+  <|> parseBinary
   <|> do
     char '('
     x <- try parseList <|> parseDottedList
     char ')'
     return x
 
--- <|> between (char '(') (char ')') (try parseList <|> parseDottedList)
+-- <|> between (char '(') (char ')') (try parseList <|> parseDottedList) 
 
-readExpr :: String -> String
+readExpr :: String -> LispVal
 readExpr input = case parse parseExpr "lisp" input of
-  Left err -> "No match: " ++ show err
-  Right val -> "Found Value"
+  Left err -> String $ "No match: " ++ show err
+  Right val -> val
+
+unwordsList :: [LispVal] -> String
+unwordsList = unwords . map showVal
+
+showVal :: LispVal -> String
+showVal (Bool b)       = if b == True then "#t" else "#f"
+showVal (String s)     = "\"" ++ s ++ "\""
+showVal (Number n)     = show n
+showVal (Atom a)       = a
+showVal (List l)       = "(" ++ unwordsList l ++ ")"
+showVal (DottedList l v) = "(" ++ unwordsList l ++ " . " ++ (showVal v) ++ ")"
+
+apply :: String -> [LispVal] -> LispVal
+apply func args = maybe (Bool False) ($ args) $ lookup func primitives
+
+primitives :: [(String, [LispVal] -> LispVal)]
+primitives = [("+", numericBinop (+)),
+              ("-", numericBinop (-)),
+              ("*", numericBinop (*)),
+              ("/", numericBinop div),
+              ("mod", numericBinop mod),
+              ("quotient", numericBinop quot),
+              ("remainder", numericBinop rem),
+              ("number?", isNumber),
+              ("string?", isString),
+              ("boolean?", isBoolean),
+              ("list?", isList)]
+
+isList :: [LispVal] -> LispVal
+isList [(List _)]    = Bool True
+isList _             = Bool False
+
+isBoolean :: [LispVal] -> LispVal
+isBoolean [(Bool _)] = Bool True
+isBoolean _          = Bool False
+
+isString :: [LispVal] -> LispVal
+isString [(String _)] = Bool True
+isString _            = Bool False
+
+isNumber :: [LispVal] -> LispVal
+isNumber [(Number _)]  = Bool True
+isNumber _             = Bool False
+
+numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
+numericBinop op params = Number $ foldl1 op $ map unpackNum params
+
+unpackNum :: LispVal -> Integer
+unpackNum (Number n) = n
+unpackNum _ = 0
+
+eval :: LispVal -> LispVal
+eval val@(String _)       = val
+eval val@(Bool   _)       = val
+eval val@(Atom   _)       = val
+eval val@(Binary _)       = val
+eval val@(Number _)       = val
+--eval val@(List   l)       = List (map eval l)
+eval val@(DottedList h t) = DottedList (map eval h) (eval t)
+eval (List (Atom func : args)) = apply func $ map eval args
 
 main :: IO ()
-main = do
-  (expr:_) <- getArgs
-  putStrLn $ readExpr expr
+main = getArgs >>= print . eval . readExpr . head
 
 
 {- main :: IO ()
